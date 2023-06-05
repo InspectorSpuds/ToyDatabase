@@ -205,7 +205,32 @@ string ParseTreeToString::select(const SelectStatement *stmt) {
 }
 
 string ParseTreeToString::insert(const InsertStatement *stmt) {
-    return "INSERT ...";
+    string ret("INSERT INTO ");
+    ret += stmt->tableName;
+    if (stmt->type == InsertStatement::kInsertSelect)
+        return ret + "SELECT ...";
+
+    bool doComma = false;
+    if (stmt->columns != NULL) {
+        ret += " (";
+        for (auto const &column: *stmt->columns) {
+            if (doComma)
+                ret += ", ";
+            ret += column;
+            doComma = true;
+        }
+        ret += ")";
+    }
+    ret += " VALUES (";
+    doComma = false;
+    for (Expr *expr : *stmt->values) {
+        if (doComma)
+            ret += ", ";
+        ret += expression(expr);
+        doComma = true;
+    }
+    ret += ")";
+    return ret;
 }
 
 string ParseTreeToString::create(const CreateStatement *stmt) {

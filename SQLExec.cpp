@@ -23,6 +23,11 @@ using namespace hsql;
 Tables *SQLExec::tables = nullptr;
 Indices *SQLExec::indices = nullptr;
 
+int SQLExec::transactionLevel = 0;
+int SQLExec::lockFile_FD = -1;
+string SQLExec::LOCKFILE = "./.sql4300dblock.lock";
+
+
 // make query result be printable
 ostream &operator<<(ostream &out, const QueryResult &qres) {
     if (qres.column_names != nullptr) {
@@ -41,6 +46,9 @@ ostream &operator<<(ostream &out, const QueryResult &qres) {
                         break;
                     case ColumnAttribute::TEXT:
                         out << "\"" << value.s << "\"";
+                        break;
+                    case ColumnAttribute::BOOLEAN:
+                        out << (value.n == 0 ? "false" : "true");
                         break;
                     default:
                         out << "???";
@@ -112,7 +120,6 @@ QueryResult *SQLExec::execute(const SQLStatement *statement) {
                 break;
             case kStmtTransaction:
                 //handle different transaction statements
-               ``````````````````````````` 
                 switch(statement->command) {
                     case kBeginTransaction:
                         //incr level and push a new rollback level onto rollback stack
@@ -122,7 +129,7 @@ QueryResult *SQLExec::execute(const SQLStatement *statement) {
 
                         result = new QueryResult("new transaction level created");
                         break;
-                    
+
                     case kCommitTransaction:
                         if(transactionLevel == 0) {
                             result = new QueryResult("Error: cannot commit, transaction not defined");
@@ -140,14 +147,11 @@ QueryResult *SQLExec::execute(const SQLStatement *statement) {
 
                         abort_transaction();
                         result = new QueryResult(string("successfully aborted transaction level" + (transactionLevel + 1)));
-
                         break;
-                    
                     default:
                         result = new QueryResult("Invalid Transaction command type");
                         break;
                 }
-            
             default:
                 result = new QueryResult("not implemented");
                 break;
@@ -450,10 +454,10 @@ QueryResult* SQLExec::insert(const InsertStatement *statement) {
                 break;
             case kExprLiteralString:
                 tuple[colName] = string(expression->name);
-                abortCommand += colname + " = " + expression->name;
+                abortCommand += colName + " = " + expression->name;
                 break;
             default:
-                throw SqlExecError("Type support not implemented");
+                throw SQLExecError("Type support not implemented");
         }
 
         if(index != statement->values->size() - 1);
@@ -469,7 +473,7 @@ QueryResult* SQLExec::insert(const InsertStatement *statement) {
         indices->get_index(tableName, indexName).insert(insertHandle);
 
     //push back the abort command into the stack and return query result
-    currRollbackLevel.push(SQLParser::parseSQLString(abortCommand));
+    currRollbackLevel->push(SQLParser::parseSQLString(abortCommand));
     return new QueryResult("successfully inserted row");
 }
 
@@ -524,7 +528,7 @@ QueryResult* SQLExec::del(const DeleteStatement *statement) {
 
     //make a list of tuples and convert them into insert statements
     EvalPlan* getAllTuples = new EvalPlan(table);
-    getAllTuples = new EvalPlan(getWhereClauses(statement-expr), getAllTuples);
+    getAllTuples = new EvalPlan(getWhereClauses(statement->expr), getAllTuples);
     ValueDict* tuplesToDelete = getAllTuples->evaluate();
     for(auto tuple: tuplesToDelete) {
         //get columns and add where clauses to command string
@@ -544,11 +548,11 @@ QueryResult* SQLExec::del(const DeleteStatement *statement) {
 
     //delete records and indices, recording what 
     EvalPipeline pipeline = plan->pipeline();
-    Handles* handles = eval_pipeline.second;
+    handles = eval_pipeline.second;
     IndexNames index_names = indices->get_index_names(table_name);
     for (Handle handle: *handles) {
         for (Identifier index_name : index_names) {
-            indices->get_index(table_name, index_name).del(handle);
+            indices->get_index(tableName, index_name).del(handle);
         }
         table.del(handle);
     }
@@ -558,9 +562,35 @@ QueryResult* SQLExec::del(const DeleteStatement *statement) {
 }
 
 QueryResult *SQLExec::select(const SelectStatement *statement) {
-
+Identifier table_name = statement->fromTable->getName();
+    ValueDict where = {{"table_name", Value(table_name)}};
+    Handles* handle = tables->select(&where);
+    if(handle->empty())
+    {
+        throw SQLExecError("Table " + table_name + " does not exist");
+    }
+    DbRelation &table = tables->get_table(table_name);
+    ColumnNames *names = new ColumnNames();
+    if((*statement->selectList)[0]->type == kExprStar)
+    {
+        for(auto name:table.get_column_names())
+        {
+            names->push_back(name);
+        }
+    } else {
+        for (auto expr: *statement->selectList) {
+            names->push_back(expr->name);
+        }
+    }
+    EvalPlan *plan = new EvalPlan(table);
+    if(statement->whereClause != nullptr){
+        plan = new EvalPlan(get_where_conjuction(statement->whereClause), plan);
+    }
+    plan = new EvalPlan(names, plan);
+    ValueDicts *rows = plan->evaluate();
+    delete handle;
+    return new QueryResult(names, table.get_column_attributes(*names), rows, "successfully returned " + to_string(rows->size()) + " rows");  // FIXME
 }
-
 
 /**
  * @brief Shows all tables
@@ -660,7 +690,7 @@ void SQLExec::awaitDBLock() {
     //try to create lock file if it doesn't exist, acquiring permission with unmask if needed
     mode_t m = umask( 0 );
     lockFile_FD = open(LOCKFILE.c_str(), O_RDWR|O_CREAT, 0666);
-    unmask(m);
+    umask(m);
     int fileLockAcquired = 0;
 
 
@@ -690,7 +720,6 @@ QueryResult* SQLExec::commit_transaction() {
 void SQLExec::abort_transaction(stack<SQLRollbackLevel> &curr) {
     if(transactionLevel == 0)
         return;
-    
     while(!curr.empty()) {
         SQLRollbackLevel currLevel = curr.pop();
         
