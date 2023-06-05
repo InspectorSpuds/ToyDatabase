@@ -19,7 +19,6 @@ HeapTable::HeapTable(Identifier table_name, ColumnNames column_names, ColumnAttr
         }
 
 
-
 //file is the HeapFile associated with the HeapTable object
 void HeapTable::create() {
     file.create();

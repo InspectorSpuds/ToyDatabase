@@ -1,305 +1,286 @@
-#include "../sql-parser/src/SQLParser.h"
-#include "../sql-parser/src/sqlhelper.h"
-#include "heap_storage.h"
-#include "storage_engine.h"
-// #include "heap_storage.cpp"
-#include "db_cxx.h"
+//Ryan Silveira
+// 4/16/2023
+//CPSC 4300 - Milestone 1
+
 #include <iostream>
-#include <cstring>
-#include <sstream>
 #include <cstdio>
+#include <cstdlib>
+#include <string>
+#include "db_cxx.h"
+#include "SQLParser.h"
+#include "ParseTreeToString.h"
+#include "SQLExec.h"
 using namespace std;
+using namespace hsql;
 
-const std::string QUIT = "quit";
-const unsigned int BLOCK_SZ = 4096;
-const string TEST = "test";
-const char *MILESTONE1 = "milestone1.db";
+
+string parse(const SQLStatement* result);
+string expressionToString(const Expr *expr);
+string operatorExpressionToString(const Expr *expr);
+string tableRefInfoToString(const TableRef *table);
+string parseInsert(const InsertStatement *statement);
+string parseCreate(const CreateStatement *stmt);
+string parseSelect(const SelectStatement *stmt);
+string parseShow(const ShowStatement *stmt);
+
+//db environment variables
+u_int32_t env_flags = DB_CREATE | DB_INIT_MPOOL; //If the environment does not exist, create it.  Initialize memory.
+u_int32_t db_flags = DB_CREATE; //If the database does not exist, create it.
 DbEnv *_DB_ENV;
+int transactionLevel = 0;
 
-std::string execute(hsql::SQLParserResult* query, std::string response);
-std::string parseCreate(std::string response);
-string parseTableRef(hsql::TableRef* tableRef);
-string parseSelect(hsql::SelectStatement* selectStatement);
-string parseExpressionWithOperator(hsql::Expr* expr);
-string parseExpressionWithoutOperator(hsql::Expr* expr);
-string parseExpression(hsql::Expr* expr);
-void test_heap_storage2();
-
-int main(int argc, char *argv[]) {
-    if (argc != 2) {
-        std::cout << "Usage: ./milestone1 path" << std::endl;
+int main(int argc, char **argv) {
+   if(argc != 2){
+        cerr << "Missing path." << endl;
         return -1;
     }
-    std::string directory = argv[1];
+    string dbPath = argv[1];
 
-    // maybe check if directory is valid?
-
-    // Create database in directory
-    // Path must be from root of directory (eg cpsc4300/data)
-    const char *home = std::getenv("HOME");
-	std::string envdir = std::string(home) + "/" + directory;
-
-    DbEnv env(0U);
-    env.set_message_stream(&std::cout);
-	env.set_error_stream(&std::cerr);
-	env.open(envdir.c_str(), DB_CREATE | DB_INIT_MPOOL, 0);
-
-	Db db(&env, 0);
-	db.set_message_stream(env.get_message_stream());
-	db.set_error_stream(env.get_error_stream());
-	db.set_re_len(BLOCK_SZ);
-	int id = db.open(NULL, MILESTONE1, NULL, DB_RECNO, DB_CREATE | DB_TRUNCATE, 0644);
-    if(id == 0) cout << "In main, opened successfully" << endl;
-
-    _DB_ENV = &env;
-
-    std::string response;
-
-    while (response != QUIT) {
-        std::cout << "SQL> ";
-        getline(std::cin, response);
-
-        if (response == TEST) {
-            if (test_heap_storage())
-                std::cout << "Passed heap storage tests";
-        }
-
-        char* responseArray = new char[response.length() + 1];
-        strcpy(responseArray, response.c_str());
-
-        hsql::SQLParserResult* result = hsql::SQLParser::parseSQLString(responseArray);
-
-        if (result->isValid()) {
-            std::string sql = execute(result, response);
-            std::cout << sql << std::endl;
-        }
-        else if (response != QUIT) {
-            std::cout << "Invalid SQL: " << response << std::endl;
-        }
-
-        delete [] responseArray;
-        delete result;
+    //init db environment locally and globally
+    DbEnv environment(0U);
+    try {
+        environment.set_message_stream(&cout);
+	    environment.set_error_stream(&cerr);
+	    environment.open(dbPath.c_str(), env_flags, 0);
+    } catch(DbException &E) {
+        cout << "Error creating DB environment" << endl;
+        exit(EXIT_FAILURE);
     }
-}
+    _DB_ENV = &environment;
+    initialize_schema_tables();
 
-std::string execute(hsql::SQLParserResult* query, std::string response) {
-    std::string finalQuery = "";
-    int n = query->size();
 
-    for (int i = 0; i < n; i++) {
-        const hsql::SQLStatement* statement = query->getStatement(i);
-        hsql::StatementType statementType = statement->type();
-
-        switch(statementType){
-            case hsql::kStmtCreate: // create statement
-            {
-                    finalQuery += parseCreate(response);
-                    break;
-            }
-            case hsql::kStmtSelect:{ // select statement
-                hsql::SelectStatement* selectStatement = (hsql::SelectStatement*)statement;
-                cout << parseSelect(selectStatement);               
-                break;
-            }
-        }
-    }
-    return finalQuery;
-}
-
-string parseTableRef(hsql::TableRef* tableRef){
-    string finalString = "";
-
-    if(tableRef->list != nullptr){ // if there is >1 table in the list, parse all of them        
-        for(int i=0; i < tableRef->list->size(); i++){
-            finalString += parseTableRef((*tableRef->list)[i]);
-            if(i < tableRef->list->size() - 1) 
-                finalString += ", ";
-        }
-    }
-
-    hsql::TableRefType tableRefType = tableRef->type; // type of table expression (join, table name, etc)
-    switch(tableRefType){
-        case hsql::kTableName:{ // if the table ref is a table name
-            finalString += tableRef->name; // add table name
-            if(tableRef->alias != nullptr) // check if there's an alias (tableName AS alias)
-                finalString += " AS " + (string)tableRef->alias; // add "AS alias"
+    //main parse loop
+    while(true){
+        string sqlcmd;
+        cout << "SQL> ";
+        getline(cin, sqlcmd);
+        if(sqlcmd == "quit"){
             break;
         }
-        case hsql::kTableJoin:{ // if the table ref is a join expression
-            hsql::JoinDefinition* joinDefinition = tableRef->join;
-            hsql::JoinType joinType = joinDefinition->type; // type of join (inner, outer, etc)
-            hsql::Expr* joinCondition = joinDefinition->condition;
-            string joinTypeString = ""; // type of join (inner, outer, etc)
-            string leftTableString = parseTableRef(joinDefinition->left); // parse the left table in the join; get the string
-            string rightTableString = parseTableRef(joinDefinition->right); // same for the right table in the join
-                
-            switch(joinType){
-                case hsql::kJoinLeft:{
-                    joinTypeString = "LEFT JOIN";
-                    break;
-                }case hsql::kJoinRight:{
-                    joinTypeString = "RIGHT JOIN";
-                    break;
-                }case hsql::kJoinInner:{
-                    joinTypeString = "JOIN";
-                    break;
-                }case hsql::kJoinOuter:{
-                    joinTypeString = "OUTER JOIN";
-                    break;
+        SQLParserResult* result = SQLParser::parseSQLString(sqlcmd);
+        if(!result->isValid()){
+            cout << "Invalid command: " << sqlcmd << endl;
+        } else {
+            for(uint i = 0; i < result->size(); ++i){
+                const SQLStatement* statement = result->getStatement(i);
+                try {
+                    cout << ParseTreeToString::statement(statement) << endl;
+                    QueryResult *q_result = SQLExec::execute(statement);
+                    cout << *q_result << endl;
+                    delete q_result;
+                }
+                catch (SQLExecError &e) {
+                    cerr << e.what() << endl;
                 }
             }
-            finalString = leftTableString + " " + joinTypeString + " " + rightTableString + " ON " + parseExpression(joinCondition);
         }
+        delete result;
     }
 
-    return finalString;
+    //close db environment
+    return 0;
+} 
+
+string expressionToString(const Expr *expr) {
+    string ret;
+    switch (expr->type){
+        case kExprStar:
+            ret += "*";
+            break;
+        case kExprColumnRef:
+            if (expr->table != NULL)
+                ret += string(expr->table) + ".";
+        case kExprLiteralString:
+            ret += expr->name;
+            break;
+        case kExprLiteralFloat:
+            ret += to_string(expr->fval);
+            break;
+        case kExprLiteralInt:
+            ret += to_string(expr->ival);
+            break;
+        case kExprFunctionRef:
+            ret += string(expr->name) + "?" + expr->expr->name;
+            break;
+        case kExprOperator:
+            ret += operatorExpressionToString(expr);
+            break;
+        default:
+            ret += "???";  // in case there are exprssion types we don't know about here
+            break;
+    }
+    if (expr->alias != NULL)
+        ret += string(" AS ") + expr->alias;
+    return ret;
 }
 
-string parseExpression(hsql::Expr* expr){
-    string finalString = "";
+string operatorExpressionToString(const Expr *expr) {
+    if (expr == NULL)
+        return "null";
+    string ret;
+    // Unary prefix operator: NOT
+    if (expr->opType == Expr::NOT)
+        ret += "NOT ";
+    // Left-hand side of expression
+    ret += expressionToString(expr->expr) + " ";
+    // Operator itself
+    switch (expr->opType){
+        case Expr::SIMPLE_OP:
+            ret += expr->opChar;
+            break;
+        case Expr::AND:
+            ret += "AND";
+            break;
+        case Expr::OR:
+            ret += "OR";
+            break;
+        default:
+            break; 
+    }
+    if (expr->expr2 != NULL)
+        ret += " " + expressionToString(expr->expr2);
+    return ret;
+}
 
-    switch(expr->type){
-        // Base cases: if the expression doesn't have an operator, just parse the literal or column
-        case hsql::kExprLiteralFloat:
-            finalString += to_string(expr->fval); // TODO: fix floating point conversion
+string tableRefInfoToString(const TableRef *table) {
+    string ret;
+    switch (table->type) {
+        case kTableSelect:
+            ret += "kTableSelect FIXME"; // FIXME
             break;
-        case hsql::kExprLiteralInt:{
-            finalString += to_string(expr->ival); 
+        case kTableName:
+            ret += table->name;
+            if (table->alias != NULL)
+                ret += string(" AS ") + table->alias;
             break;
-        }case hsql::kExprLiteralString:{
-            finalString += expr->getName();
-            break;
-        }case hsql::kExprColumnRef:{ // a column name, might have a table name
-            char* varName = expr->name;
-            char* table = expr->table;
-
-            if(table != nullptr) // if there's a table name, add tableName.colName to finalString
-                finalString += (string)table + ".";
-            finalString += varName;
-            break;
-        }case hsql::kExprOperator:{
-            finalString += parseExpression(expr->expr); // parse the expression on the left side of the operator, which might have an operator, add that            
-
-            // add the operator character (=, >, etc.) to the final string, in between the LHS and RHS
-            if(expr->opType != 0){ // if there is an operator, parse it
-                        switch(expr->opType){
-                            case 3:{ 
-                                switch(expr->opChar){
-                                    case '=':{
-                                        finalString += " = "; 
-                                        break;
-                                    }case '<':{
-                                        finalString += " < "; 
-                                        break;
-                                    }case '>':{
-                                        finalString += " > "; 
-                                        break;
-                                    }case '+':{
-                                        finalString += " + "; 
-                                        break;
-                                    }case '-':{
-                                        finalString += " - "; 
-                                        break;
-                                    }case '*':{
-                                        finalString += " * "; 
-                                        break;
-                                    }case '/':{
-                                        finalString += " / "; 
-                                        break;
-                                    }case '%':{
-                                        finalString += " % "; 
-                                        break;
-                                    }
-                                }
-                                break;
-                            }case 4:{
-                                finalString += " <> ";
-                                break;
-                            }case 5:{
-                                finalString += " <= ";
-                                break;
-                            }case 6:{
-                                finalString += " >= ";
-                                break;
-                            }
-                        }
+        case kTableJoin:
+            ret += tableRefInfoToString(table->join->left);
+            switch (table->join->type){
+                case kJoinCross:
+                case kJoinInner:
+                    ret += " JOIN ";
+                    break;
+                case kJoinOuter:
+                case kJoinLeftOuter:
+                case kJoinLeft:
+                    ret += " LEFT JOIN ";
+                    break;
+                case kJoinRightOuter:
+                case kJoinRight:
+                    ret += " RIGHT JOIN ";
+                    break;
+                case kJoinNatural:
+                    ret += " NATURAL JOIN ";
+                    break;
             }
-
-            finalString += parseExpression(expr->expr2);
-        }
-    }
-
-    return finalString;
-}
-
-
-string parseSelect(hsql::SelectStatement* selectStatement){
-    string finalString = "SELECT ";
-    hsql::TableRef* table = selectStatement->fromTable;
-    hsql::Expr* whereClause = selectStatement->whereClause;
-    vector<hsql::Expr*>* columnsToSelect = selectStatement->selectList;
-
-    for(int i = 0; i < columnsToSelect->size(); i++){
-        hsql::Expr* expr = (*columnsToSelect)[i];
-        hsql::ExprType exprType = expr->type; // type of expression
-
-        switch(exprType){
-            case hsql::kExprStar: // if we're selecting *, add * to the string
-                finalString += "*";
-                break;           
-            case hsql::kExprColumnRef:{ // if we are selecting columns, add the column names to the string
-                if(expr->hasTable()) // if there's a table name before the column name (tableName.colName)
-                    finalString += (string)expr->table + ".";
-               
-                if(expr->name != nullptr)
-                    finalString += (string)expr->name;
-
-                if(expr->hasAlias())
-                    finalString += " AS " + (string)expr->alias;
-
-                if(i < columnsToSelect->size() - 1) 
-                    finalString += ", ";
-
-                break;
+            ret += tableRefInfoToString(table->join->right);
+            if (table->join->condition != NULL)
+                ret += " ON " + expressionToString(table->join->condition);
+            break;
+        case kTableCrossProduct:
+            bool doComma = false;
+            for (TableRef *tbl : *table->list){
+                if (doComma)
+                    ret += ", ";
+                ret += tableRefInfoToString(tbl);
+                doComma = true;
             }
-        }
+            break;
     }
-
-    finalString += (" FROM "+ parseTableRef(table));
-    if(whereClause != nullptr)
-        finalString += " WHERE " + parseExpression(whereClause);
-    return finalString;
+    return ret;
 }
 
-std::string parseCreate(std::string response) {
-    std::stringstream ss(response);
-
-    std::string parsed = "CREATE TABLE ";
-    std::string temp;
-    // get rid of create table
-    ss >> temp >> temp;
-
-    // name
-    ss >> temp;
-
-    parsed += temp + " ";
-
-    bool isName = true;
-    // get column names and types
-    while (ss >> temp) {
-        if (isName) {
-            parsed += temp + " ";
-        }
-        else {
-            // convert type to uppercase
-            for (char &c : temp)
-                c = std::toupper(c);
-            if (temp == "INTEGER,")
-                temp = "INT,";
-            parsed += temp + " ";
-        }
-        isName = !isName;
+string columnDefinitionToString(const ColumnDefinition *col) {
+    string ret(col->name);
+    switch (col->type) {
+        case ColumnDefinition::DOUBLE:
+            ret += " DOUBLE";
+            break;
+        case ColumnDefinition::INT:
+            ret += " INT";
+            break;
+        case ColumnDefinition::TEXT:
+            ret += " TEXT";
+            break;
+        default:
+            ret += " ...";
+            break;
     }
+    return ret;
+}
 
-    return parsed;
+string parse(const SQLStatement* result){
+    switch(result->type()){
+        case kStmtSelect:
+            return parseSelect((const SelectStatement *) result);
+        case kStmtCreate:
+            return parseCreate((const CreateStatement *) result);
+        case kStmtInsert:
+            return parseInsert((const InsertStatement *) result);
+        case kStmtShow:
+            return parseShow((const ShowStatement *) result);
+
+        //something else is handling this now, no need to refractor honestly
+        case kStmtTransaction:
+            return "";
+
+        default:
+            return "Not implemented.";
+    }
+} 
+
+string parseInsert(const InsertStatement *statement){
+    return "INSERT ...";
+}
+
+string parseShow(const ShowStatement *stmt) {
+    string ret("SHOW ");
+    switch(stmt->type) {
+        case ShowStatement::kTables:
+            ret += "TABLES";
+            break;
+        case ShowStatement::kColumns:
+            ret += string("COLUMNS FROM ") + stmt->tableName;
+            break;
+        case ShowStatement::kIndex:
+            ret += string("INDEX FROM ") + stmt->tableName;
+            break;
+        default:
+            return "Invalid show";
+    }
+    return ret;
+}
+
+string parseCreate(const CreateStatement *stmt){
+    string ret("CREATE TABLE ");
+    if (stmt->type != CreateStatement::kTable)
+        return ret + "...";
+    if (stmt->ifNotExists)
+        ret += "IF NOT EXISTS ";
+    ret += string(stmt->tableName) + " (";
+    bool doComma = false;
+    for (ColumnDefinition *col : *stmt->columns){
+        if (doComma)
+            ret += ", ";
+        ret += columnDefinitionToString(col);
+        doComma = true;
+    }
+    ret += ")";
+    return ret;
+}
+
+string parseSelect(const SelectStatement *stmt){
+    string ret("SELECT ");
+    bool doComma = false;
+    for (Expr *expr : *stmt->selectList){
+        if (doComma)
+            ret += ", ";
+        ret += expressionToString(expr);
+        doComma = true;
+    }
+    ret += " FROM " + tableRefInfoToString(stmt->fromTable);
+    if (stmt->whereClause != NULL)
+        ret += " WHERE " + expressionToString(stmt->whereClause);
+    return ret;
 }

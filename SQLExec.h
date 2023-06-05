@@ -23,7 +23,7 @@ public:
 //A class that defines a new rollback level or statement to rollback
 struct SQLRollbackLevel {
     hsql::SQLStatement* rollbackStmt = nullptr;
-    stack<SQLRollbackLevel>* nestedTransaction = nullptr;
+    stack<SQLRollbackLevel> nestedTransaction;
 }
 
 
@@ -106,13 +106,15 @@ protected:
 
     static QueryResult *insert(const hsql::InsertStatement *statement);
 
-    static QueryResult *del(const hsql::DeleteStatement *statement);
+    static QueryResult *del(const hsql::DeleteStatement* statement);
 
-    static QueryResult* begin_transaction(const hsql::TransactionStatement *statement);
+    static QueryResult *select(const hsql::SelectStatement *statement);
+
+    static ValueDict* getWhereClauses(const Expr* whereExpression);
 
     static QueryResult* commit_transaction();
 
-    static QueryResult* abort_transaction();
+    static void abort_transaction(stack<SQLRollbackLevel> curr);
 
     static void awaitDBLock();
 
