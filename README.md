@@ -9,6 +9,14 @@ Executes `CREATE`, `DROP`, and `SHOW` SQL statements in a Berkeley DB Database. 
 ### Milestone 4
 Builds off of Milestone 3 to `CREATE`, `DROP`, and `SHOW` indices as well as tables.
 
+### Milestone 5
+Evaluation plan added for statements like insert and select, initiali support for transactions added
+
+### Milestone 6
+Created a transaction system using stacks and a lock file (through the flock() system call), where on a rollback, 
+statements that were added to the rollbackStack (statements that counter the effects of statements made during the transaction)
+are executed for some given transaction level
+
 ## Installation
 1. Clone the repository on CS1
 
