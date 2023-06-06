@@ -46,6 +46,8 @@ public:
 
     virtual Handles *select(const ValueDict *where);
 
+    Handles* select(Handles *current, const ValueDict *where);
+
     virtual ValueDict *project(Handle handle);
 
     virtual ValueDict *project(Handle handle, const ColumnNames *column_names);

@@ -15,8 +15,11 @@ bool Value::operator!=(const Value &other) const {
 
 bool Value::operator<(const Value &other) const {
     if (this->data_type != other.data_type) {
-        // arbitrary ordering of data types: INT < TEXT && BOOLEAN
-
+        // arbitrary ordering of data types: BOOLEAN < INT < TEXT
+        if (this->data_type == ColumnAttribute::BOOLEAN)
+            return true;
+        if (other.data_type == ColumnAttribute::BOOLEAN)
+            return false;
         if (this->data_type == ColumnAttribute::INT)
             return true;
         if (other.data_type == ColumnAttribute::INT)
@@ -28,12 +31,19 @@ bool Value::operator<(const Value &other) const {
     return this->n < other.n;
 }
 
+std::ostream &operator<<(std::ostream &out, const Value &value) {
+    if (value.data_type == ColumnAttribute::DataType::TEXT)
+        out << value.s;
+    else if (value.data_type == ColumnAttribute::DataType::INT)
+        out << value.n;
+    else if (value.n)
+        out << "true";
+    else
+        out << "false";
+    return out;
+}
 
 
-
-
-
-/*
 // Get only selected column attributes
 ColumnAttributes *DbRelation::get_column_attributes(const ColumnNames &select_column_names) const {
     ColumnAttributes *ret = new ColumnAttributes();
@@ -42,11 +52,19 @@ ColumnAttributes *DbRelation::get_column_attributes(const ColumnNames &select_co
         if (it == this->column_names.end()) {
             delete ret;
             throw DbRelationError("unknown column " + column_name);
-        
+        }
         ptrdiff_t index = it - this->column_names.begin();
         ret->push_back(this->column_attributes[index]);
     }
     return ret;
+}
+
+// Just pulls out the column names from a ValueDict and passes that to the usual form of project().
+ValueDict *DbRelation::project(Handle handle, const ValueDict *where) {
+    ColumnNames t;
+    for (auto const &column: *where)
+        t.push_back(column.first);
+    return this->project(handle, &t);
 }
 
 // Do a projection for each of a list of handles
@@ -65,5 +83,13 @@ ValueDicts *DbRelation::project(Handles *handles, const ColumnNames *column_name
     return ret;
 }
 
-
-*/
+// Do a projection for each of a list of handles
+ValueDicts *DbRelation::project(Handles *handles, const ValueDict *where) {
+    ColumnNames t;
+    for (auto const &column: *where)
+        t.push_back(column.first);
+    ValueDicts *ret = new ValueDicts();
+    for (auto const &handle: *handles)
+        ret->push_back(project(handle, &t));
+    return ret;
+}

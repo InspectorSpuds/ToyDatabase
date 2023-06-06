@@ -11,6 +11,7 @@
 #include <vector>
 #include "SQLParser.h"
 #include "SchemaTables.h"
+using namespace std;
 
 /**
  * @class SQLExecError - exception for SQLExec methods
@@ -22,6 +23,7 @@ public:
 
 //A class that defines a new rollback level or statement to rollback
 struct SQLRollbackLevel {
+    SQLRollbackLevel(hsql::SQLStatement* rollback, stack<SQLRollbackLevel> nest) : rollbackStmt(rollback), nestedTransaction(nest) {};
     hsql::SQLStatement* rollbackStmt = nullptr;
     stack<SQLRollbackLevel> nestedTransaction;
 };
@@ -73,21 +75,21 @@ public:
      */
     static QueryResult *execute(const hsql::SQLStatement *statement);
 
+    //add sql statements that counter added sql actions in case of rollback
+    static stack<SQLRollbackLevel> rollbackStack;
+    static stack<SQLRollbackLevel>* currRollbackLevel;
+    static int transactionLevel;
+    static int lockFile_FD;
+
 protected:
     // the one place in the system that holds the _tables and _indices tables
     static Tables *tables;
     static Indices *indices;
-    static int transactionLevel;
-    static int lockFile_FD;
+
 
     //create a hidden dblock file (ideally you, the user should not directly access
     //this outside the program) (for the love of god at least don't while the milestone processes are running : ) )
-    static const string LOCKFILE;
-
-    //add sql statements that counter added sql actions in case of rollback
-    static stack<SQLRollbackLevel> rollbackStack();
-    static stack<SQLRollbackLevel>* currRollbackLevel = &rollbackStack;
-    
+    static string LOCKFILE;
 
     // recursive decent into the AST
     static QueryResult *create(const hsql::CreateStatement *statement);
@@ -110,11 +112,9 @@ protected:
 
     static QueryResult *select(const hsql::SelectStatement *statement);
 
-    static ValueDict* getWhereClauses(const Expr* whereExpression);
-
     static QueryResult* commit_transaction();
 
-    static void abort_transaction(stack<SQLRollbackLevel> curr);
+    static void abort_transaction(stack<SQLRollbackLevel> &curr);
 
     static void awaitDBLock();
 

@@ -220,9 +220,9 @@ class Value {
         int32_t n;
         std::string s;
 
-        Value() : n(0) { data_type = ColumnAttribute::INT; }
+        Value() : n(0), s("") { data_type = ColumnAttribute::INT; }
 
-        Value(int32_t n) : n(n) { data_type = ColumnAttribute::INT; }
+        Value(int32_t n) : n(n), s("") { data_type = ColumnAttribute::INT; }
 
         Value(std::string s) : n(0), s(s) { data_type = ColumnAttribute::TEXT; }
 
@@ -363,11 +363,11 @@ class DbRelation {
             return column_names;
         }
 
-        ColumnAttributes get_column_attributes(const ColumnNames &select_column_names) const;
+        ColumnAttributes* get_column_attributes(const ColumnNames &select_column_names) const;
         ValueDict* project(Handle handle, const ValueDict *where);
-        ValueDicts project(Handles *handles);
-        ValueDicts project(Handles *handles, const ColumnNames *column_names);
-        ValueDicts* project(Handles *handles, const ValueDict * &where);
+        ValueDicts* project(Handles *handles);
+        ValueDicts* project(Handles *handles, const ColumnNames *column_names);
+        ValueDicts* project(Handles *handles, const ValueDict *where);
 
     protected:
         Identifier table_name;

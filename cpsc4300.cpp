@@ -10,6 +10,7 @@
 #include "SQLParser.h"
 #include "ParseTreeToString.h"
 #include "SQLExec.h"
+#include "TransactionStatement.h"
 using namespace std;
 using namespace hsql;
 
@@ -57,20 +58,60 @@ int main(int argc, char **argv) {
         if(sqlcmd == "quit"){
             break;
         }
+
+
+
+
+
+
         SQLParserResult* result = SQLParser::parseSQLString(sqlcmd);
-        if(!result->isValid()){
+
+        if(!result->isValid() && sqlcmd != "begin transaction" && sqlcmd != "rollback transaction" && sqlcmd != "commit transaction"){
             cout << "Invalid command: " << sqlcmd << endl;
         } else {
             for(uint i = 0; i < result->size(); ++i){
-                const SQLStatement* statement = result->getStatement(i);
-                try {
-                    cout << ParseTreeToString::statement(statement) << endl;
-                    QueryResult *q_result = SQLExec::execute(statement);
-                    cout << *q_result << endl;
-                    delete q_result;
-                }
-                catch (SQLExecError &e) {
-                    cerr << e.what() << endl;
+                if(sqlcmd == "begin transaction") {
+                    
+                    const SQLStatement* statement =  new TransactionStatement(TransactionCommand::kBeginTransaction);
+                    try {
+                        QueryResult *q_result = SQLExec::execute(statement);
+                        cout << *q_result << endl;
+                        delete q_result;
+                    }
+                    catch (SQLExecError &e) {
+                        cerr << e.what() << endl;
+                    }
+                } else if(sqlcmd == "commit transaction") {
+                    const SQLStatement* statement =  new TransactionStatement(TransactionCommand::kCommitTransaction);
+                    try {
+                        QueryResult *q_result = SQLExec::execute(statement);
+                        cout << *q_result << endl;
+                        delete q_result;
+                    }
+                    catch (SQLExecError &e) {
+                        cerr << e.what() << endl;
+                    }
+                } else if(sqlcmd == "rollback transaction") {
+                    const SQLStatement* statement =  new TransactionStatement(TransactionCommand::kRollbackTransaction);
+                    try {
+                        QueryResult *q_result = SQLExec::execute(statement);
+                        cout << *q_result << endl;
+                        delete q_result;
+                    }
+                    catch (SQLExecError &e) {
+                        cerr << e.what() << endl;
+                    }
+                } else {
+                    const SQLStatement* statement = result->getStatement(i);
+                    try {
+                        cout << ParseTreeToString::statement(statement) << endl;
+                        QueryResult *q_result = SQLExec::execute(statement);
+                        cout << *q_result << endl;
+                        delete q_result;
+                    }
+                    catch (SQLExecError &e) {
+                        cerr << e.what() << endl;
+                    }
                 }
             }
         }

@@ -1,48 +1,58 @@
 #include "EvalPlan.h"
+#include "HeapTable.h"
 
-typedef std::pair<DbRelation*, Handles> EvalPipeline;
+class Substitute: public DbRelation {
+  public:
+    Substitute(): DbRelation("Substitute", ColumnNames(), ColumnAttributes()) {};
 
-EvalPlan::EvalPlan(PlanType type, EvalPlan* relation) {
+    Handle insert(const ValueDict* row) {return Handle(0,0);};
+
+    static Substitute& getRef() {
+      static Substitute subs;
+      return subs;
+    }
+
+    
+};
+
+
+
+EvalPlan::EvalPlan(PlanType type, EvalPlan* relation) : table(Substitute::getRef()) {
   this->type = type;
   this->relation = relation;
   this->projection = nullptr;
   this->select_conjunction = nullptr;
-  this->table = DbRelation();
 }
 
-EvalPlan::EvalPlan(ColumnNames *projection, EvalPlan *relation) {
+EvalPlan::EvalPlan(ColumnNames *projection, EvalPlan *relation) : table(Substitute::getRef()) {
   const PlanType EVAL_TYPE = PROJECT;
 
   this->type = EVAL_TYPE;
   this->relation = relation;
   this->projection = projection;
   this->select_conjunction = nullptr;
-  this->table = DbRelation();
 }
 
-EvalPlan::EvalPlan(ValueDict *conjunction, EvalPlan *relation) {
+EvalPlan::EvalPlan(ValueDict *conjunction, EvalPlan *relation) : table(Substitute::getRef()){
   const PlanType EVAL_TYPE = SELECT;
 
   this->type = EVAL_TYPE;
   this->relation = relation;
   this->projection = nullptr;
   this->select_conjunction = conjunction;
-  this->table = DbRelation();
 }
 
-EvalPlan::EvalPlan(DbRelation &table) {
-  this->type = PlanType.TABLESCAN;
+EvalPlan::EvalPlan(DbRelation &table) : table(table) {
+  this->type = PlanType::TABLESCAN;
   this->projection = nullptr;
   this->select_conjunction = nullptr;
-  this->table = table;
 }
 
-EvalPlan::EvalPlan(const EvalPlan* other) {
+EvalPlan::EvalPlan(const EvalPlan* other) : table(other->table) {
   this->type = other->type;
-  this->table = other->table;
   this->relation = (other->relation? new EvalPlan(*other->relation) : nullptr);
   this->projection = (other->projection ? new ColumnNames(*other->projection) : nullptr);
-  this->select_conjunction(other->select_conjunction ? new ValueDict(*other->select_conjunction) : nullptr);
+  this->select_conjunction = (other->select_conjunction ? new ValueDict(*other->select_conjunction) : nullptr);
 }
 
 EvalPlan::~EvalPlan() {
@@ -53,13 +63,13 @@ EvalPlan::~EvalPlan() {
 
 ValueDicts* EvalPlan::evaluate() {
   //need to know what to project column wise to return results
-  if(this->type != ProjectAll && this->type != Project)
+  if(this->type != PROJECTALL && this->type != PROJECT)
     throw DbRelationError("Eval Plan must end with a projection");
   
-  ValueDict returnVals = nullptr;
+  ValueDicts* returnVals = nullptr;
   EvalPipeline pipeline = this->relation->pipeline();
   DbRelation* tempTable = pipeline.first;
-  Handles* handlese = pipeline.second;
+  Handles* handles = pipeline.second;
   
   if(this->type == PROJECTALL)
     returnVals = tempTable->project(handles);
@@ -82,7 +92,7 @@ EvalPipeline EvalPlan::pipeline() {
     Handles* handles = pipe.second; 
     
     //make new pipeline with select
-    EvalPipeline ret(tempTable, tempTable->select(handles, this->select_conjunction));
+    EvalPipeline ret(tempTable, ((HeapTable*)tempTable)->select(handles, this->select_conjunction));
 
     delete handles;
     return ret;
