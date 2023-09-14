@@ -1,6 +1,6 @@
 # 4300-Cheetah
 ## Description
-DB Relation Manager project for CPSC4300 at Seattle U, Spring 2023, Project Echidna
+DB Relation Manager project for CPSC4300 at Seattle U, Spring 2023, Project Echidna. This is a fork of the original repository I contributed to. 
 
 ## New Features
 ### Milestone 3
